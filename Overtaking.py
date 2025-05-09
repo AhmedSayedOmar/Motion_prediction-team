@@ -24,14 +24,14 @@ Dependencies:
   pip install numpy scipy matplotlib Pillow
 """
 
+#!/usr/bin/env python3
 import numpy as np
 import math
 import time
 from copy import deepcopy
-from scipy.optimize import minimize
-from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from scipy.interpolate import interp1d
 
 # -----------------------------------------------------------------------
 # Data Structure: Scaled Waypoint (for lateral boundaries)
@@ -53,7 +53,7 @@ class CollisionPredictor:
     threshold the collision region ends (cend). In this simulation the opponent’s 
     lateral coordinate is fixed (d_opp = 0).
     """
-    def __init__(self, time_steps=200, dt=0.02, 
+    def __init__(self, time_steps=200, dt=0.02,
                  save_distance_front=0.6, save_distance_back=0.4):
         self.time_steps = time_steps
         self.dt = dt
@@ -68,7 +68,7 @@ class CollisionPredictor:
         s_opp = s_opp_init
         d_opp = 0.0  # Opponent is exactly on raceline
         states = []  # save each timestep
-        
+
         for i in range(self.time_steps):
             t = i * self.dt
             s_ego_next = s_ego + vs_ego * self.dt
@@ -112,12 +112,15 @@ class SQPAvoidanceNode:
         self.max_kappa = max_kappa
         self.current_d = 0.0  # Ego’s current lateral coordinate (raceline)
 
-    def plan_overtake(self, s_start, s_end, cur_d_ego, scaled_wpnts, track_length, extension=2.0):
-        # Extend the planning domain.
+    def plan_overtake(self, s_start, s_end, cur_d_ego,
+                      scaled_wpnts, track_length, extension=2.0):
+        from scipy.optimize import minimize
+        #from scipy.interpolate import interp1d
+
         s_lower = max(0, s_start - extension)
         s_upper = min(track_length, s_end + extension)
         s_avoid = np.linspace(s_lower, s_upper, self.avoidance_resolution)
-        
+
         d_min_arr = []
         d_max_arr = []
         for s in s_avoid:
@@ -130,12 +133,21 @@ class SQPAvoidanceNode:
                 dmax = mid
             d_min_arr.append(dmin)
             d_max_arr.append(dmax)
+
         d_min_arr = np.array(d_min_arr)
         d_max_arr = np.array(d_max_arr)
-        
+
         # Initial guess: use current lateral coordinate.
         x0 = np.full(len(s_avoid), cur_d_ego)
-        
+
+        def curvature(d): #function from paper... allows us to cap max curavture, allows for overtaking in lower lateral accelerations (safety reasons as well)
+            d = np.array(d)
+            dd_ds = np.gradient(d, s_avoid) #lateral offset slope
+            d2d_ds = np.gradient(dd_ds, s_avoid) #slopes rate of change
+            kappa = np.abs(d2d_ds / (1 + dd_ds**2)**1.5) #frenet curvature formula
+            #print("Max curvature:", np.max(kappa))
+            return self.max_kappa - kappa
+
         # Define the desired lateral profile.
         def desired_d(s):
             if s <= s_start:
@@ -146,8 +158,8 @@ class SQPAvoidanceNode:
                 mid = (s_start + s_end) / 2.0
                 half_width = (s_end - s_start) / 2.0
                 return -0.015 * (1 - ((s - mid) / half_width) ** 2)
-        
-        # Objective: tracking plus smoothness.
+
+        # Objective: tracking plus smoothness
         def objective(d):
             d_arr = np.array(d)
             desired_profile = np.array([desired_d(s_val) for s_val in s_avoid])
@@ -155,9 +167,10 @@ class SQPAvoidanceNode:
             smooth_cost = np.sum(np.diff(np.diff(d_arr)) ** 2)
             first_derivative_cost = (np.diff(d_arr)[0] ** 2)
             return 1000 * tracking_cost + 100 * smooth_cost + 1000 * first_derivative_cost
-        
+
         bounds = [(d_min_arr[i], d_max_arr[i]) for i in range(len(s_avoid))]
-        res = minimize(objective, x0, method='SLSQP', bounds=bounds, options={'maxiter': 50})
+        res = minimize(objective, x0, method='SLSQP', bounds=bounds, constraints=[{'type':'ineq','fun':curvature}], options={'maxiter': 50})
+        #res = minimize(objective, x0, method='SLSQP', bounds=bounds, options={'maxiter': 50})
         if not res.success:
             return s_avoid, x0, False
         return s_avoid, res.x, True
@@ -187,17 +200,21 @@ def animate_collision(trace, track_length, filename="collision_prediction.gif"):
     opp_point, = ax.plot([], [], 'ro', markersize=8, label="Opponent")
     time_text = ax.text(0.02, 0.9, '', transform=ax.transAxes)
     ax.legend()
+
     def init():
         ego_point.set_data([], [])
         opp_point.set_data([], [])
         time_text.set_text('')
         return ego_point, opp_point, time_text
+
     def update(frame):
         state = trace[frame]
-        ego_point.set_data(state['s_ego'], 0.0)
-        opp_point.set_data(state['s_opp'], state['d_opp'])
+        # wrap in lists so they're sequences:
+        ego_point.set_data([state['s_ego']], [0.0])
+        opp_point.set_data([state['s_opp']], [state['d_opp']])
         time_text.set_text(f"t = {state['time']:.3f} s")
         return ego_point, opp_point, time_text
+
     anim = animation.FuncAnimation(fig, update, frames=len(trace),
                                    init_func=init, blit=True, interval=50)
     writer = animation.PillowWriter(fps=10)
@@ -347,4 +364,4 @@ if __name__ == "__main__":
         print(f"  s={s_val:.3f} m, d={d_val:.3f} m")
     
     animate_collision(trace_collision, track_length, filename="collision_prediction.gif")
-    animate_extended_overtaking(extended_trace, filename="overtaking_plan.gif")
+    animate_extended_overtaking(extended_trace, filename="overtaking_plan_withcurvature.gif")
