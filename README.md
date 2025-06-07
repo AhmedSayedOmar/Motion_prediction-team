@@ -7,7 +7,6 @@ This project is a modified version of [MixNet](https://doi.org/10.5281/zenodo.69
 Additionally, for overtaking scenarios, we take as inspiration real-time motion prediction and overtaking from the [Predictive Spliner](https://arxiv.org/abs/2209.12689) paper with our Transformer-based model to enable more dynamic and intelligent overtaking behavior.
 
 This repository was developed as part of our graduation project by:
-
 - Myron Tadros  
 - Abdelrahman Eissa  
 - Ahmed Omar  
