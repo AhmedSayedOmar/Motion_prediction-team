@@ -12,7 +12,7 @@ This repository was developed as part of our graduation project by:
 - Ahmed Omar  
 - Bola Warsy  
 - Omar Abousheishaa  
-- Rohin Nair  
+- Rohin Nair.
 
 ## Acknowledgments
 
